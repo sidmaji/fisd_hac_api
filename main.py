@@ -129,28 +129,27 @@ def get_student_schedule(session: requests.Session) -> List[Dict[str, Any]]:
     schedule = []
 
     try:
-        # Find the schedule table
-        schedule_table = soup.find("table", {"class": "sg-asp-table"})
-        if schedule_table:
-            rows = schedule_table.find_all("tr")[1:]  # Skip header row
+        # Find all schedule rows using the correct class name
+        courses = soup.find_all("tr", "sg-asp-table-data-row")
 
-            for row in rows:
-                cells = row.find_all("td")
-                if len(cells) >= 7:
-                    course_info = {
-                        "building": cells[0].text.strip(),
-                        "courseCode": cells[1].text.strip(),
-                        "courseName": cells[2].text.strip(),
-                        "periods": cells[3].text.strip(),
-                        "days": cells[4].text.strip(),
-                        "room": cells[5].text.strip(),
-                        "teacher": cells[6].text.strip(),
-                        "markingPeriods": (
-                            cells[7].text.strip() if len(cells) > 7 else ""
-                        ),
-                        "status": "Active",
+        for row in courses:
+            row_parser = BeautifulSoup(f"<html><body>{row}</body></html>", "lxml")
+            tds = [x.text.strip() for x in row_parser.find_all("td")]
+
+            if len(tds) > 7:
+                schedule.append(
+                    {
+                        "courseCode": tds[0],
+                        "courseName": tds[1],
+                        "periods": tds[2],
+                        "teacher": tds[3],
+                        "room": tds[4],
+                        "days": tds[5],
+                        "markingPeriods": tds[6],
+                        "building": tds[7],
+                        "status": tds[8] if len(tds) > 8 else "Active",
                     }
-                    schedule.append(course_info)
+                )
     except Exception as e:
         print(f"Error parsing schedule: {e}")
 
@@ -168,56 +167,117 @@ def get_current_classes(session: requests.Session) -> List[Dict[str, Any]]:
 
     try:
         # Find all class containers
-        class_containers = soup.find_all("div", {"class": "AssignmentClass"})
+        class_containers = soup.find_all("div", "AssignmentClass")
 
         for container in class_containers:
-            class_info = {}
+            new_course = {
+                "name": "",
+                "grade": "",
+                "weight": "5",  # Default weight
+                "credits": "1",  # Default credits
+                "lastUpdated": "",
+                "assignments": [],
+            }
 
-            # Get class name and grade
-            class_header = container.find(
-                "div", {"class": "sg-header sg-header-square"}
+            course_parser = BeautifulSoup(
+                f"<html><body>{container}</body></html>", "lxml"
             )
-            if class_header:
-                class_name_element = class_header.find(
-                    "a", {"class": "sg-header-heading"}
-                )
+            header_container = course_parser.find_all(
+                "div", "sg-header sg-header-square"
+            )
+            assignments_container = course_parser.find_all("div", "sg-content-grid")
+
+            # Parse header information
+            for hc in header_container:
+                header_parser = BeautifulSoup(f"<html><body>{hc}</body></html>", "lxml")
+
+                # Get class name
+                class_name_element = header_parser.find("a", "sg-header-heading")
                 if class_name_element:
-                    class_info["name"] = class_name_element.text.strip()
+                    new_course["name"] = class_name_element.text.strip()
 
-                # Look for grade in the header
-                grade_match = re.search(r"(\d+\.?\d*)%?", class_header.text)
-                if grade_match:
-                    class_info["grade"] = grade_match.group(1)
-                else:
-                    class_info["grade"] = ""
+                # Get last updated info
+                last_updated_element = header_parser.find(
+                    "span", "sg-header-sub-heading"
+                )
+                if last_updated_element:
+                    new_course["lastUpdated"] = (
+                        last_updated_element.text.strip()
+                        .replace("(Last Updated: ", "")
+                        .replace(")", "")
+                    )
 
-            # Get class details (weight, credits, etc.)
-            class_info["weight"] = "5"  # Default weight
-            class_info["credits"] = "1"  # Default credits
-            class_info["lastUpdated"] = ""
+                # Get grade
+                grade_element = header_parser.find("span", "sg-header-heading sg-right")
+                if grade_element:
+                    grade_text = grade_element.text.strip()
+                    # Extract grade percentage, removing "Student Grades " prefix and "%" suffix
+                    grade_clean = grade_text.replace("Student Grades ", "").replace(
+                        "%", ""
+                    )
+                    new_course["grade"] = grade_clean
 
-            # Get assignments
-            assignments = []
-            assignment_table = container.find("table", {"class": "sg-asp-table"})
+            # Parse assignments
+            for ac in assignments_container:
+                assignments_parser = BeautifulSoup(
+                    f"<html><body>{ac}</body></html>", "lxml"
+                )
+                rows = assignments_parser.find_all("tr", "sg-asp-table-data-row")
 
-            if assignment_table:
-                assignment_rows = assignment_table.find_all("tr")[1:]  # Skip header
+                for assignment_container in rows:
+                    try:
+                        assignment_parser = BeautifulSoup(
+                            f"<html><body>{assignment_container}</body></html>", "lxml"
+                        )
+                        tds = assignment_parser.find_all("td")
 
-                for row in assignment_rows:
-                    cells = row.find_all("td")
-                    if len(cells) >= 6:
-                        assignment = {
-                            "name": cells[2].text.strip(),
-                            "category": cells[3].text.strip(),
-                            "dateAssigned": cells[0].text.strip(),
-                            "dateDue": cells[1].text.strip(),
-                            "score": cells[4].text.strip(),
-                            "totalPoints": cells[5].text.strip(),
-                        }
-                        assignments.append(assignment)
+                        if len(tds) >= 6:
+                            assignment_name_element = assignment_parser.find("a")
+                            assignment_name = (
+                                assignment_name_element.text.strip()
+                                if assignment_name_element
+                                else ""
+                            )
 
-            class_info["assignments"] = assignments
-            classes.append(class_info)
+                            assignment_date_due = tds[0].text.strip()
+                            assignment_date_assigned = tds[1].text.strip()
+                            assignment_category = tds[3].text.strip()
+                            assignment_score = tds[4].text.strip()
+                            assignment_total_points = tds[5].text.strip()
+
+                            # Convert score and total points to numbers when possible
+                            try:
+                                score = (
+                                    float(assignment_score)
+                                    if assignment_score.strip()
+                                    else None
+                                )
+                            except (ValueError, AttributeError):
+                                score = assignment_score
+
+                            try:
+                                total_points = (
+                                    float(assignment_total_points)
+                                    if assignment_total_points.strip()
+                                    else None
+                                )
+                            except (ValueError, AttributeError):
+                                total_points = assignment_total_points
+
+                            new_course["assignments"].append(
+                                {
+                                    "name": assignment_name,
+                                    "category": assignment_category,
+                                    "dateAssigned": assignment_date_assigned,
+                                    "dateDue": assignment_date_due,
+                                    "score": score,
+                                    "totalPoints": total_points,
+                                }
+                            )
+                    except Exception:
+                        pass
+
+            classes.append(new_course)
 
     except Exception as e:
         print(f"Error parsing classes: {e}")

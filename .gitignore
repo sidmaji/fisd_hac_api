@@ -3,3 +3,4 @@
 /api/.env
 /api/venv/
 /api/.vercel/
+previous main.py
