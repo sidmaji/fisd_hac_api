@@ -28,6 +28,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ClassesRequest(BaseModel):
+    username: str
+    password: str
+    quarter: str = "current"  # Default to current quarter
+
+
 # Helper Functions
 def getRequestSession(username: str, password: str) -> requests.Session:
     requestSession = requests.Session()
@@ -144,13 +150,109 @@ def get_student_schedule(session: requests.Session) -> List[Dict[str, Any]]:
     return schedule
 
 
-def get_current_classes(session: requests.Session) -> List[Dict[str, Any]]:
-    """Extract current classes with assignments and grades"""
-    response = session.get(
-        f"{HAC_BASE_URL}/HomeAccess/Content/Student/Assignments.aspx"
-    )
-    soup = BeautifulSoup(response.text, "lxml")
+def get_classes(
+    session: requests.Session, quarter: str = "current"
+) -> List[Dict[str, Any]]:
+    """Extract classes with assignments and grades for current or past quarters"""
 
+    if quarter == "current":
+        # Get current classes - same as before
+        response = session.get(
+            f"{HAC_BASE_URL}/HomeAccess/Content/Student/Assignments.aspx"
+        )
+        course_content = response.text
+    else:
+        # Get past classes for specific quarter
+        headers = {
+            "Host": "hac.friscoisd.org",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:98.0) Gecko/20100101 Firefox/98.0",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://hac.friscoisd.org",
+            "Referer": "https://hac.friscoisd.org/HomeAccess/Content/Student/Assignments.aspx",
+        }
+
+        # First get the current page to extract viewstate and other required fields
+        initial_response = session.get(
+            f"{HAC_BASE_URL}/HomeAccess/Content/Student/Assignments.aspx"
+        )
+        initial_soup = BeautifulSoup(initial_response.text, "lxml")
+
+        # Extract required form fields
+        viewstate = initial_soup.find("input", {"name": "__VIEWSTATE"})["value"]
+        viewstate_generator = initial_soup.find(
+            "input", {"name": "__VIEWSTATEGENERATOR"}
+        )["value"]
+        event_validation = initial_soup.find("input", {"name": "__EVENTVALIDATION"})[
+            "value"
+        ]
+
+        payload = {
+            "__EVENTTARGET": "ctl00$plnMain$btnRefreshView",
+            "__EVENTARGUMENT": "",
+            "__VIEWSTATE": viewstate,
+            "__VIEWSTATEGENERATOR": viewstate_generator,
+            "__EVENTVALIDATION": event_validation,
+            "ctl00$plnMain$hdnValidMHACLicense": "Y",
+            "ctl00$plnMain$hdnIsVisibleClsWrk": "N",
+            "ctl00$plnMain$hdnIsVisibleCrsAvg": "N",
+            "ctl00$plnMain$hdnJsAlert": "Averages+cannot+be+displayed+when++Report+Card+Run+is+set+to+(All+Runs).",
+            "ctl00$plnMain$hdnTitle": "Classwork",
+            "ctl00$plnMain$hdnLastUpdated": "Last+Updated",
+            "ctl00$plnMain$hdnDroppedCourse": "+This+course+was+dropped+as+of+",
+            "ctl00$plnMain$hdnddlClasses": "(All+Classes)",
+            "ctl00$plnMain$hdnddlCompetencies": "(All+Classes)",
+            "ctl00$plnMain$hdnCompDateDue": "Date+Due",
+            "ctl00$plnMain$hdnCompDateAssigned": "Date+Assigned",
+            "ctl00$plnMain$hdnCompCourse": "Course",
+            "ctl00$plnMain$hdnCompAssignment": "Assignment",
+            "ctl00$plnMain$hdnCompAssignmentLabel": "Assignments+Not+Related+to+Any+Competency",
+            "ctl00$plnMain$hdnCompNoAssignments": "No+assignments+found",
+            "ctl00$plnMain$hdnCompNoClasswork": "Classwork+could+not+be+found+for+this+competency+for+the+selected+report+card+run.",
+            "ctl00$plnMain$hdnCompScore": "Score",
+            "ctl00$plnMain$hdnCompPoints": "Points",
+            "ctl00$plnMain$hdnddlReportCardRuns1": "(All+Runs)",
+            "ctl00$plnMain$hdnddlReportCardRuns2": "(All+Terms)",
+            "ctl00$plnMain$hdnbtnShowAverage": "Show+All+Averages",
+            "ctl00$plnMain$hdnShowAveragesToolTip": "Show+all+student's+averages",
+            "ctl00$plnMain$hdnPrintClassworkToolTip": "Print+all+classwork",
+            "ctl00$plnMain$hdnPrintClasswork": "Print+Classwork",
+            "ctl00$plnMain$hdnCollapseToolTip": "Collapse+all+courses",
+            "ctl00$plnMain$hdnCollapse": "Collapse+All",
+            "ctl00$plnMain$hdnFullToolTip": "Switch+courses+to+Full+View",
+            "ctl00$plnMain$hdnViewFull": "Full+View",
+            "ctl00$plnMain$hdnQuickToolTip": "Switch+courses+to+Quick+View",
+            "ctl00$plnMain$hdnViewQuick": "Quick+View",
+            "ctl00$plnMain$hdnExpand": "Expand+All",
+            "ctl00$plnMain$hdnExpandToolTip": "Expand+all+courses",
+            "ctl00$plnMain$hdnChildCompetencyMessage": "This+competency+is+calculated+as+an+average+of+the+following+competencies",
+            "ctl00$plnMain$hdnCompetencyScoreLabel": "Grade",
+            "ctl00$plnMain$hdnAverageDetailsDialogTitle": "Average+Details",
+            "ctl00$plnMain$hdnAssignmentCompetency": "Assignment+Competency",
+            "ctl00$plnMain$hdnAssignmentCourse": "Assignment+Course",
+            "ctl00$plnMain$hdnTooltipTitle": "Title",
+            "ctl00$plnMain$hdnCategory": "Category",
+            "ctl00$plnMain$hdnDueDate": "Due+Date",
+            "ctl00$plnMain$hdnMaxPoints": "Max+Points",
+            "ctl00$plnMain$hdnCanBeDropped": "Can+Be+Dropped",
+            "ctl00$plnMain$hdnHasAttachments": "Has+Attachments",
+            "ctl00$plnMain$hdnExtraCredit": "Extra+Credit",
+            "ctl00$plnMain$hdnType": "Type",
+            "ctl00$plnMain$hdnAssignmentDataInfo": "Information+could+not+be+found+for+the+assignment",
+            "ctl00$plnMain$ddlReportCardRuns": f"{quarter}-2025",
+            "ctl00$plnMain$ddlClasses": "ALL",
+            "ctl00$plnMain$ddlCompetencies": "ALL",
+            "ctl00$plnMain$ddlOrderBy": "Class",
+        }
+
+        response = session.post(
+            f"{HAC_BASE_URL}/HomeAccess/Content/Student/Assignments.aspx",
+            data=payload,
+            headers=headers,
+        )
+        course_content = response.text
+
+    # Parse the response (same logic for both current and past)
+    soup = BeautifulSoup(course_content, "lxml")
     courses = []
 
     try:
@@ -211,7 +313,7 @@ def get_current_classes(session: requests.Session) -> List[Dict[str, Any]]:
                     except:
                         pass
 
-                courses.append(newCourse)
+            courses.append(newCourse)
 
     except Exception as e:
         print(f"Error parsing classes: {e}")
@@ -596,8 +698,6 @@ async def root():
     {
       "name": "MTH45300A - 1    AP Calculus AB S1",
       "grade": "95.5",
-      "weight": "5",
-      "credits": "1",
       "lastUpdated": "01/15/2025",
       "assignments": [
         {
@@ -607,6 +707,40 @@ async def root():
           "dateDue": "01/15/2025",
           "score": "98",
           "totalPoints": "100"
+        }
+      ]
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+                <div class="endpoint">
+                    <h3><span class="method">POST</span>/api/classes</h3>
+                    <div class="description">Get classes for a specific quarter (1, 2, 3, 4) or current quarter. Supports quarter parameter.</div>
+                    <div class="code-block">
+                        <pre>Request Body:
+{
+  "username": "your_username",
+  "password": "your_password",
+  "quarter": "1"  // or "2", "3", "4", "current"
+}
+
+Response:
+{
+  "pastClasses": [
+    {
+      "name": "MTH45300B - 2    AP Calculus AB S2",
+      "grade": "99.00",
+      "lastUpdated": "4/17/2025",
+      "assignments": [
+        {
+          "name": "Area & Cross Sections Test",
+          "category": "Assessment of Learning",
+          "dateAssigned": "",
+          "dateDue": "04/15/2025",
+          "score": "95.00",
+          "totalPoints": "100.00"
         }
       ]
     }
@@ -694,6 +828,7 @@ async def root():
                             <option value="/api/info">Student Info</option>
                             <option value="/api/schedule">Class Schedule</option>
                             <option value="/api/currentclasses">Current Classes</option>
+                            <option value="/api/classes">Classes (with Quarter)</option>
                             <option value="/api/transcript">Transcript</option>
                             <option value="/api/gpa">GPA & Rank</option>
                             <option value="/api/all">All Data</option>
@@ -793,9 +928,25 @@ async def get_current_classes_endpoint(request: LoginRequest):
     """Get current classes with assignments and grades"""
     try:
         session = getRequestSession(request.username, request.password)
-        classes = get_current_classes(session)
+        classes = get_classes(session, "current")
 
         return {"currentClasses": classes}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@app.post("/api/classes")
+async def get_classes_endpoint(request: ClassesRequest):
+    """Get classes with assignments and grades for specified quarter"""
+    try:
+        session = getRequestSession(request.username, request.password)
+        classes = get_classes(session, request.quarter)
+
+        # Return different key based on quarter type
+        if request.quarter == "current":
+            return {"currentClasses": classes}
+        else:
+            return {"pastClasses": classes}
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -808,7 +959,7 @@ async def get_all_data_endpoint(request: LoginRequest):
 
         info = get_student_info(session)
         schedule = get_student_schedule(session)
-        classes = get_current_classes(session)
+        classes = get_classes(session, "current")
 
         if not info:
             raise HTTPException(status_code=401, detail="Invalid credentials")
