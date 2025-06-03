@@ -219,6 +219,132 @@ def get_current_classes(session: requests.Session) -> List[Dict[str, Any]]:
     return courses
 
 
+def get_student_transcript(session: requests.Session) -> List[Dict[str, Any]]:
+    """Extract student transcript data"""
+    response = session.get(f"{HAC_BASE_URL}/HomeAccess/Content/Student/Transcript.aspx")
+    soup = BeautifulSoup(response.text, "lxml")
+
+    transcript_data = []
+
+    try:
+        # Find all transcript groups
+        transcript_groups = soup.find_all("td", "sg-transcript-group")
+
+        for index, group in enumerate(transcript_groups):
+            group_parser = BeautifulSoup(f"<html><body>{group}</body></html>", "lxml")
+            tables = group_parser.find_all("table")
+
+            if len(tables) >= 3:
+                header_table = tables[0]
+                courses_table = tables[1]
+                credits_table = tables[2]
+
+                # Extract header information
+                header_parser = BeautifulSoup(
+                    f"<html><body>{header_table}</body></html>", "lxml"
+                )
+                year_attended = header_parser.find(
+                    "span", id=f"plnMain_rpTranscriptGroup_lblYearValue_{index}"
+                ).text.strip()
+                grade_level = header_parser.find(
+                    "span", id=f"plnMain_rpTranscriptGroup_lblGradeValue_{index}"
+                ).text.strip()
+                school_building = header_parser.find(
+                    "span", id=f"plnMain_rpTranscriptGroup_lblBuildingValue_{index}"
+                ).text.strip()
+
+                # Extract course details
+                courses_parser = BeautifulSoup(
+                    f"<html><body>{courses_table}</body></html>", "lxml"
+                )
+                course_rows = courses_parser.find_all("tr", "sg-asp-table-data-row")
+
+                course_list = []
+                for course_row in course_rows:
+                    row_parser = BeautifulSoup(
+                        f"<html><body>{course_row}</body></html>", "lxml"
+                    )
+                    course_cells = row_parser.find_all("td")
+
+                    if len(course_cells) >= 6:
+                        course_code = course_cells[0].text.strip()
+                        course_name = course_cells[1].text.strip()
+                        semester1_grade = course_cells[2].text.strip()
+                        semester2_grade = course_cells[3].text.strip()
+                        final_grade = course_cells[4].text.strip()
+                        credit_hours = course_cells[5].text.strip()
+
+                        course_list.append(
+                            {
+                                "courseCode": course_code,
+                                "courseName": course_name,
+                                "sem1Grade": semester1_grade,
+                                "sem2Grade": semester2_grade,
+                                "finalGrade": final_grade,
+                                "courseCredits": credit_hours,
+                            }
+                        )
+
+                # Extract total credits
+                credits_parser = BeautifulSoup(
+                    f"<html><body>{credits_table}</body></html>", "lxml"
+                )
+                total_credits = credits_parser.find(
+                    "label", id=f"plnMain_rpTranscriptGroup_LblTCreditValue_{index}"
+                ).text
+
+                transcript_data.append(
+                    {
+                        "yearsAttended": year_attended,
+                        "gradeLevel": grade_level,
+                        "building": school_building,
+                        "totalCredits": total_credits,
+                        "courses": course_list,
+                    }
+                )
+
+    except Exception as e:
+        print(f"Error parsing transcript: {e}")
+
+    return transcript_data
+
+
+def get_student_gpa(session: requests.Session) -> Dict[str, Any]:
+    """Extract student GPA information"""
+    response = session.get(f"{HAC_BASE_URL}/HomeAccess/Content/Student/Transcript.aspx")
+    soup = BeautifulSoup(response.text, "lxml")
+
+    gpa_data = {
+        "unweightedGPA": "",
+        "weightedGPA": "",
+        "rank": None,
+    }
+
+    try:
+        # Extract weighted and unweighted GPA
+        weighted_gpa_element = soup.find(id="plnMain_rpTranscriptGroup_lblGPACum1")
+        unweighted_gpa_element = soup.find(id="plnMain_rpTranscriptGroup_lblGPACum2")
+
+        if weighted_gpa_element:
+            gpa_data["weightedGPA"] = weighted_gpa_element.text.strip()
+
+        if unweighted_gpa_element:
+            gpa_data["unweightedGPA"] = unweighted_gpa_element.text.strip()
+
+        # Try to extract class rank (may not be available for all students)
+        try:
+            rank_element = soup.find(id="plnMain_rpTranscriptGroup_lblGPARank1")
+            if rank_element:
+                gpa_data["rank"] = rank_element.text.strip()
+        except:
+            pass
+
+    except Exception as e:
+        print(f"Error parsing GPA: {e}")
+
+    return gpa_data
+
+
 # API Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -490,6 +616,53 @@ async def root():
                 </div>
 
                 <div class="endpoint">
+                    <h3><span class="method">POST</span>/api/transcript</h3>
+                    <div class="description">Get student transcript with all courses, grades, and credits by year.</div>
+                    <div class="code-block">
+                        <pre>{
+  "studentTranscript": [
+    {
+      "yearsAttended": "2022-2023",
+      "gradeLevel": "11",
+      "building": "Independence High School",
+      "totalCredits": "7.5000",
+      "courses": [
+        {
+          "courseCode": "A3220100 - 1",
+          "courseName": "AP ENG LANG",
+          "sem1Grade": "88",
+          "sem2Grade": "92",
+          "finalGrade": "",
+          "courseCredits": "1.0000"
+        },
+        {
+          "courseCode": "A3100900 - 1",
+          "courseName": "AP CALC AB",
+          "sem1Grade": "95",
+          "sem2Grade": "97",
+          "finalGrade": "",
+          "courseCredits": "1.0000"
+        }
+      ]
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+                <div class="endpoint">
+                    <h3><span class="method">POST</span>/api/gpa</h3>
+                    <div class="description">Get student GPA information including weighted, unweighted, and class rank.</div>
+                    <div class="code-block">
+                        <pre>{
+  "unweightedGPA": "3.8500",
+  "weightedGPA": "4.9200",
+  "rank": "42 / 387"
+}</pre>
+                    </div>
+                </div>
+
+                <div class="endpoint">
                     <h3><span class="method">POST</span>/api/all</h3>
                     <div class="description">Get all student data in one request (most efficient for apps).</div>
                     <div class="code-block">
@@ -521,6 +694,8 @@ async def root():
                             <option value="/api/info">Student Info</option>
                             <option value="/api/schedule">Class Schedule</option>
                             <option value="/api/currentclasses">Current Classes</option>
+                            <option value="/api/transcript">Transcript</option>
+                            <option value="/api/gpa">GPA & Rank</option>
                             <option value="/api/all">All Data</option>
                         </select>
                     </div>
@@ -643,6 +818,30 @@ async def get_all_data_endpoint(request: LoginRequest):
             "studentSchedule": schedule,
             "currentClasses": classes,
         }
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@app.post("/api/transcript")
+async def get_student_transcript_endpoint(request: LoginRequest):
+    """Get student transcript with all courses and grades"""
+    try:
+        session = getRequestSession(request.username, request.password)
+        transcript = get_student_transcript(session)
+
+        return {"studentTranscript": transcript}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@app.post("/api/gpa")
+async def get_student_gpa_endpoint(request: LoginRequest):
+    """Get student GPA and class rank information"""
+    try:
+        session = getRequestSession(request.username, request.password)
+        gpa_info = get_student_gpa(session)
+
+        return gpa_info
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
