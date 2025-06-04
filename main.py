@@ -265,17 +265,33 @@ def get_classes(
             headerContainer = parser.find_all("div", "sg-header sg-header-square")
             assignementsContainer = parser.find_all("div", "sg-content-grid")
 
+            # Flag to track if this course should be skipped
+            skip_course = False
+
             for hc in headerContainer:
                 parser = BeautifulSoup(f"<html><body>{hc}</body></html>", "lxml")
 
+                # Check if this course is dropped by looking for the DroppedCourse span
+                dropped_course_span = parser.find("span", "DroppedCourse")
+                if dropped_course_span:
+                    # Mark this course to be skipped
+                    skip_course = True
+                    break
+
                 newCourse["name"] = parser.find("a", "sg-header-heading").text.strip()
 
-                newCourse["lastUpdated"] = (
-                    parser.find("span", "sg-header-sub-heading")
-                    .text.strip()
-                    .replace("(Last Updated: ", "")
-                    .replace(")", "")
-                )
+                # Find the last updated span that's not the dropped course span
+                last_updated_span = parser.find("span", "sg-header-sub-heading")
+                if last_updated_span and "DroppedCourse" not in last_updated_span.get(
+                    "class", []
+                ):
+                    newCourse["lastUpdated"] = (
+                        last_updated_span.text.strip()
+                        .replace("(Last Updated: ", "")
+                        .replace(")", "")
+                    )
+                else:
+                    newCourse["lastUpdated"] = ""
 
                 newCourse["grade"] = (
                     parser.find("span", "sg-header-heading sg-right")
@@ -283,6 +299,10 @@ def get_classes(
                     .replace("Student Grades ", "")
                     .replace("%", "")
                 )
+
+            # Skip processing this course if it's dropped
+            if skip_course:
+                continue
 
             for ac in assignementsContainer:
                 parser = BeautifulSoup(f"<html><body>{ac}</body></html>", "lxml")
