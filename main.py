@@ -131,6 +131,16 @@ def get_student_schedule(session: requests.Session) -> List[Dict[str, Any]]:
             tds = [x.text.strip() for x in parser.find_all("td")]
 
             if len(tds) > 3:
+                # Extract teacher email from the teacher column (index 3)
+                teacher_cell = parser.find_all("td")[3]
+                teacher_email = ""
+                teacher_name = tds[3]
+
+                # Check if there's a mailto link in the teacher cell
+                mailto_link = teacher_cell.find("a", href=True)
+                if mailto_link and mailto_link["href"].startswith("mailto:"):
+                    teacher_email = mailto_link["href"].replace("mailto:", "").strip()
+
                 schedule.append(
                     {
                         "building": tds[7],
@@ -141,7 +151,8 @@ def get_student_schedule(session: requests.Session) -> List[Dict[str, Any]]:
                         "periods": tds[2],
                         "room": tds[4],
                         "status": tds[8],
-                        "teacher": tds[3],
+                        "teacher": teacher_name,
+                        "teacherEmail": teacher_email,
                     }
                 )
     except Exception as e:
@@ -689,7 +700,7 @@ async def root():
 
                 <div class="endpoint">
                     <h3><span class="method">POST</span>/api/schedule</h3>
-                    <div class="description">Get student class schedule with periods, rooms, and teachers.</div>
+                    <div class="description">Get student class schedule with periods, rooms, teachers, and teacher emails.</div>
                     <div class="code-block">
                         <pre>{
   "studentSchedule": [
@@ -701,6 +712,7 @@ async def root():
       "days": "A",
       "room": "B201",
       "teacher": "Smith, John",
+      "teacherEmail": "smithj@friscoisd.org",
       "markingPeriods": "Q1, Q2",
       "status": "Active"
     }
